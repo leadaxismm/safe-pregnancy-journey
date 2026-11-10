@@ -2,11 +2,13 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
+const withPwa = process.env.VITE_DISABLE_PWA !== 'true';
+
 export default defineConfig({
   base: './',
   plugins: [
     react(),
-    VitePWA({
+    withPwa && VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['icon.svg'],
       manifest: {

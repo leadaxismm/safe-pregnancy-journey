@@ -11,6 +11,8 @@
 
 @layer base {
   html { -webkit-text-size-adjust: 100%; }
+  html, body { background: #f8fafc; }
+  html.dark, html.dark body { background: #020617; }
   body { @apply font-sans text-slate-800 dark:text-slate-100 antialiased; line-height: 1.75; }
   :focus-visible { @apply outline outline-[3px] outline-offset-2 outline-brand-500; }
   h1, h2, h3 { text-wrap: balance; }

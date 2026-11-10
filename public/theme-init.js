@@ -1,1 +1,1 @@
-try{var t=localStorage.getItem('spj-theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark')}catch(e){}
+try{var r=document.documentElement;r.dir="rtl";r.lang="ar";var f=r.getAttribute('data-theme'),t=null;try{t=localStorage.getItem('spj-theme')}catch(e){}if(t==='dark'||(!t&&f==='dark')||(!t&&!f&&matchMedia('(prefers-color-scheme: dark)').matches))r.classList.add('dark')}catch(e){}
