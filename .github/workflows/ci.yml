@@ -1,0 +1,22 @@
+name: CI
+on:
+  push:
+    branches: [main, 'dev/**']
+  pull_request:
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm test
+      - run: npm run build   # includes the medical-content governance gate
+        env:
+          VITE_APP_ENV: preview
+      - name: Production build must be refused while content is not approved
+        run: |
+          if VITE_APP_ENV=production node scripts/check-content.mjs; then
+            grep -q "status: 'approved'" src/content/meta.ts || (echo "gate failed to block" && exit 1)
+          fi

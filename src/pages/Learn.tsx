@@ -4,21 +4,22 @@ import { ArrowLeft, ArrowRight, Check, ChevronDown, GraduationCap, X, Star } fro
 import { PageHeader } from '../components/PageHeader';
 import { SpeakButton } from '../components/SpeakButton';
 import { Icon } from '../components/Icon';
-import { learnCards, faq, quiz, videos } from '../content/learn';
+import { learnCards, faq, quiz, videos, dailyTips } from '../content/learn';
 import { track } from '../lib/analytics';
 
 type Phase = 'start' | 'pre' | 'cards' | 'post' | 'rate' | 'done';
 
 export default function Learn() {
   const [params, setParams] = useSearchParams();
-  const tab = params.get('tab') === 'faq' ? 'faq' : params.get('tab') === 'videos' && videos.length ? 'videos' : 'learn';
+  const q = params.get('tab');
+  const tab = q === 'faq' ? 'faq' : q === 'tips' ? 'tips' : q === 'videos' && videos.length ? 'videos' : 'learn';
   const setTab = (t: string) => setParams(t === 'learn' ? {} : { tab: t }, { replace: true });
 
   return (
     <div className="mx-auto max-w-2xl">
       <PageHeader title="تعلّمي خلال انتظارك" lead="محتوى قصير يمكنك إنهاؤه في 3–5 دقائق." icon={<GraduationCap className="h-6 w-6" />} />
       <div role="tablist" aria-label="أقسام التعلّم" className="mb-5 grid grid-flow-col gap-1 rounded-2xl bg-slate-100 p-1 dark:bg-slate-900">
-        {[['learn', 'تعلّمي في دقائق'], ['faq', 'أسئلة شائعة'], ...(videos.length ? [['videos', 'فيديوهات']] : [])].map(([k, l]) => (
+        {[['learn', 'تعلّمي في دقائق'], ['faq', 'أسئلة شائعة'], ['tips', 'نصائح يومية'], ...(videos.length ? [['videos', 'فيديوهات']] : [])].map(([k, l]) => (
           <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
             className={`min-h-[44px] rounded-xl px-3 font-bold transition ${tab === k ? 'bg-white text-brand-700 shadow-sm dark:bg-slate-800 dark:text-brand-300' : 'text-slate-600 dark:text-slate-400'}`}>
             {l}
@@ -28,6 +29,16 @@ export default function Learn() {
       {tab === 'learn' && <LearnFlow />}
       {tab === 'faq' && <Faq />}
       {tab === 'videos' && <Videos />}
+      {tab === 'tips' && (
+        <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {dailyTips.map(t => (
+            <li key={t.text} className="card flex items-center gap-4 p-4">
+              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-calm-50 text-calm-700 dark:bg-calm-900/40 dark:text-calm-300"><Icon name={t.icon} /></span>
+              <span className="text-[17px] font-bold">{t.text}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

@@ -5,7 +5,7 @@ import { PageHeader } from '../components/PageHeader';
 import { SpeakButton } from '../components/SpeakButton';
 import { useHelp } from '../components/HelpContext';
 import { riskSections, tierInfo } from '../content/riskFactors';
-import { evaluate, inRange, validRanges, computeBmi, type Answer, type ResultTier } from '../lib/riskEngine';
+import { evaluate, inRange, validRanges, computeBmi, displayBmi, parseNumber, validAge, type Answer, type ResultTier } from '../lib/riskEngine';
 import { track } from '../lib/analytics';
 
 type Step = { kind: 'intro' } | { kind: 'age' } | { kind: 'body' } | { kind: 'section'; index: number } | { kind: 'result' };
@@ -28,10 +28,7 @@ const tierStyle: Record<ResultTier, { box: string; dot: string; text: string }> 
   red: { box: 'border-urgent-500 bg-urgent-50 dark:bg-urgent-900/30', dot: 'bg-urgent-600', text: 'text-urgent-700 dark:text-urgent-100' }
 };
 
-function toNum(s: string): number | null {
-  const n = parseFloat(s.replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))));
-  return Number.isFinite(n) ? n : null;
-}
+const toNum = parseNumber;
 
 export default function RiskCheck() {
   const { openHelp } = useHelp();
@@ -63,9 +60,9 @@ export default function RiskCheck() {
 
   const progress = Math.round((i / (steps.length - 1)) * 100);
   const ageN = toNum(age), htN = toNum(ht), wtN = toNum(wt);
-  const ageErr = age !== '' && !inRange(ageN, validRanges.age);
-  const htErr = ht !== '' && !inRange(htN, validRanges.heightCm);
-  const wtErr = wt !== '' && !inRange(wtN, validRanges.weightKg);
+  const ageErr = age.trim() !== '' && !validAge(ageN);
+  const htErr = ht.trim() !== '' && !inRange(htN, validRanges.heightCm);
+  const wtErr = wt.trim() !== '' && !inRange(wtN, validRanges.weightKg);
   const bmi = computeBmi(htN, wtN);
 
   return (
@@ -113,7 +110,7 @@ export default function RiskCheck() {
               <span className="mb-1 block font-semibold">العمر بالسنوات</span>
               <input className="field" type="text" inputMode="numeric" value={age} onChange={e => setAge(e.target.value)} placeholder="مثال: 28" aria-invalid={ageErr} aria-describedby="age-err" />
             </label>
-            {ageErr && <p id="age-err" className="font-semibold text-urgent-600 dark:text-urgent-100">أدخلي عمرًا بين 12 و60 سنة.</p>}
+            {ageErr && <p id="age-err" className="font-semibold text-urgent-600 dark:text-urgent-100">أدخلي العمر بالسنوات الكاملة (رقم بين 12 و60).</p>}
           </div>
         )}
 
@@ -131,9 +128,9 @@ export default function RiskCheck() {
                 <input className="field" type="text" inputMode="decimal" value={wt} onChange={e => setWt(e.target.value)} placeholder="65" aria-invalid={wtErr} />
               </label>
             </div>
-            {htErr && <p className="font-semibold text-urgent-600 dark:text-urgent-100">أدخلي طولًا بين 120 و210 سم.</p>}
-            {wtErr && <p className="font-semibold text-urgent-600 dark:text-urgent-100">أدخلي وزنًا بين 30 و250 كجم.</p>}
-            {bmi !== null && <p className="rounded-xl bg-brand-50 p-3 font-semibold dark:bg-brand-950" aria-live="polite">مؤشر كتلة الجسم: <span className="tabular">{bmi}</span></p>}
+            {htErr && <p className="font-semibold text-urgent-600 dark:text-urgent-100">أدخلي الطول بالأرقام فقط، بين 120 و210 سم.</p>}
+            {wtErr && <p className="font-semibold text-urgent-600 dark:text-urgent-100">أدخلي الوزن بالأرقام فقط، بين 30 و250 كجم.</p>}
+            {bmi !== null && <p className="rounded-xl bg-brand-50 p-3 font-semibold dark:bg-brand-950" aria-live="polite">مؤشر كتلة الجسم: <span className="tabular">{displayBmi(bmi)}</span></p>}
           </div>
         )}
 

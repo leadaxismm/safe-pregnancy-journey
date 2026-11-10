@@ -1,7 +1,10 @@
 /**
- * Admin data layer. Two implementations:
- *  - Supabase (when VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are set): real aggregated data, RLS-protected.
- *  - Demo: clearly-labelled sample numbers so the dashboard can be reviewed before a backend exists.
+ * Admin data layer (v0.2).
+ *  - Real admin (#/admin): Supabase Auth email + password ONLY. After sign-in the account must exist in
+ *    public.admins (checked server-side by admin_whoami); otherwise it is signed out. Every read/write is
+ *    also enforced by RLS and by checks inside the SQL functions, so the UI is not the security boundary.
+ *  - Demo (#/admin-demo): a separate, read-only, unauthenticated view of SAMPLE numbers. It never talks to
+ *    the database and cannot sign in, approve content or write anything. Disabled in production builds.
  */
 import { analyticsEnabled, config } from './config';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -23,12 +26,16 @@ export interface Stats {
 export interface EdRow { month: string; total_visits: number; nonurgent_visits: number; source: string }
 export interface Approval { id: number; content_version: string; decision: 'approved' | 'changes_requested'; reviewer: string; notes: string; reviewed_at: string }
 
+export type StaffRole = 'viewer' | 'editor';
+export interface StaffSession { email: string; role: StaffRole }
+
 export interface AdminApi {
   mode: 'supabase' | 'demo';
-  getSession(): Promise<{ email: string } | null>;
-  signIn(email: string, password: string): Promise<void>;
+  getSession(): Promise<StaffSession | null>;
+  signIn(email: string, password: string): Promise<StaffSession>;
   signOut(): Promise<void>;
-  stats(from: Date, to: Date): Promise<Stats>;
+  changePassword(newPassword: string): Promise<void>;
+  stats(from: Date, to: Date, env: string): Promise<Stats>;
   ed(): Promise<EdRow[]>;
   saveEd(row: EdRow): Promise<void>;
   approvals(): Promise<Approval[]>;
@@ -42,19 +49,33 @@ async function supabaseApi(): Promise<AdminApi> {
   const { createClient } = await import('@supabase/supabase-js');
   const sb: SupabaseClient = createClient(config.supabaseUrl, config.supabaseAnonKey, { auth: { persistSession: true, storageKey: 'spj-admin' } });
   const must = <T,>(r: { data: T; error: unknown }) => { if (r.error) throw r.error; return r.data; };
+  const whoami = async (): Promise<StaffRole | null> => {
+    const { data, error } = await sb.rpc('admin_whoami');
+    return !error && (data === 'viewer' || data === 'editor') ? data : null;
+  };
   return {
     mode: 'supabase',
     async getSession() {
       const { data } = await sb.auth.getSession();
-      return data.session ? { email: data.session.user.email ?? '' } : null;
+      if (!data.session) return null;
+      const role = await whoami();
+      if (!role) { await sb.auth.signOut(); return null; }
+      return { email: data.session.user.email ?? '', role };
     },
     async signIn(email, password) {
       const { error } = await sb.auth.signInWithPassword({ email, password });
-      if (error) throw error;
+      if (error) throw new Error('invalid_credentials');
+      const role = await whoami();
+      if (!role) { await sb.auth.signOut(); throw new Error('not_authorized'); }
+      return { email, role };
     },
     async signOut() { await sb.auth.signOut(); },
-    async stats(from, to) {
-      const d = must(await sb.rpc('admin_stats', { p_from: from.toISOString(), p_to: to.toISOString() })) as any;
+    async changePassword(newPassword) {
+      const { error } = await sb.auth.updateUser({ password: newPassword });
+      if (error) throw error;
+    },
+    async stats(from, to, env) {
+      const d = must(await sb.rpc('admin_stats', { p_from: from.toISOString(), p_to: to.toISOString(), p_env: env })) as any;
       return {
         ...d,
         preAvg: num(d.preAvg), postAvg: num(d.postAvg), dangerKnownPct: num(d.dangerKnownPct), satisfactionAvg: num(d.satisfactionAvg),
@@ -101,7 +122,7 @@ function demoApi(): AdminApi {
     learnStarted: sum(m => m.learnStarted), learnCompleted: sum(m => m.learnCompleted),
     preAvg: 2.78, preN: Math.round(sum(m => m.learnStarted) * 0.7), postAvg: 4.21, postN: sum(m => m.learnCompleted),
     dangerKnownPct: 74.6, dangerN: sum(m => m.learnCompleted),
-    satisfactionAvg: 4.46, satisfactionN: Math.round(sum(m => m.learnCompleted) * 0.55), satisfactionDist: [6, 11, 48, 190, 410],
+    satisfactionAvg: 4.46, satisfactionN: 6 + 11 + 48 + 190 + 410, satisfactionDist: [6, 11, 48, 190, 410],
     topTopics: [
       { topic: 'home', views: Math.round(visits * 1.2) }, { topic: 'risk', views: Math.round(visits * 0.62) },
       { topic: 'journey', views: Math.round(visits * 0.55) }, { topic: 'learn', views: Math.round(visits * 0.48) },
@@ -115,25 +136,35 @@ function demoApi(): AdminApi {
     ],
     monthly
   };
-  let ed: EdRow[] = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08', '2026-09', '2026-10'].map(m => {
+  const ed: EdRow[] = ['2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07', '2026-08', '2026-09', '2026-10'].map(m => {
     const total = Math.round(1900 + r() * 250);
     return { month: m, total_visits: total, nonurgent_visits: Math.round(total * (0.41 + r() * 0.05)), source: 'بيانات تجريبية' };
   });
-  let approvals: Approval[] = [];
+  const approvals: Approval[] = [];
   return {
     mode: 'demo',
-    async getSession() { return { email: 'demo' }; },
-    async signIn() {}, async signOut() {},
+    // The demo has NO session and NO write capability. It cannot be used to sign in or approve anything.
+    async getSession() { return null; },
+    async signIn() { throw new Error('demo_read_only'); },
+    async signOut() {},
+    async changePassword() { throw new Error('demo_read_only'); },
     async stats() { return stats; },
     async ed() { return [...ed].sort((a, b) => a.month.localeCompare(b.month)); },
-    async saveEd(row) { ed = [...ed.filter(e => e.month !== row.month), row]; },
+    async saveEd() { throw new Error('demo_read_only'); },
     async approvals() { return approvals; },
-    async addApproval(a) { approvals = [{ ...a, id: approvals.length + 1 }, ...approvals]; }
+    async addApproval() { throw new Error('demo_read_only'); }
   };
 }
 
 let api: Promise<AdminApi> | null = null;
-export function getAdminApi() {
-  api ??= analyticsEnabled ? supabaseApi() : Promise.resolve(demoApi());
+/** Real admin API. Returns null when Supabase is not configured — there is NO fallback to demo data. */
+export function getAdminApi(): Promise<AdminApi> | null {
+  if (!analyticsEnabled) return null;
+  api ??= supabaseApi();
   return api;
+}
+
+/** Sample-data API for the separate demo dashboard only. */
+export function getDemoApi(): AdminApi {
+  return demoApi();
 }

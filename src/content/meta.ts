@@ -16,11 +16,18 @@ export const contentMeta = {
   /** ISO date of the last clinical review, or null if never reviewed */
   lastClinicalReview: null as string | null,
   approvedBy: null as string | null,
+  /** sha256 printed by `node scripts/check-content.mjs`, recorded at approval time */
+  approvedContentHash: null as string | null,
   sourceTitle: 'الدليل الإكلينيكي لرعاية الحامل في الرعاية الأولية — الشركة القابضة الصحية (MC0526_08)',
   sourcePageAuthor: 'د. بدر السهلي',
   organization: 'تجمع حفر الباطن الصحي',
   facility: 'مستشفى الولادة والأطفال',
   changelog: [
+    {
+      version: '0.1.0-draft',
+      date: '2026-11-10',
+      note: 'تحديث v0.2 للتطبيق (إصلاحات برمجية وأمنية وتصميم): لا تغيير في المحتوى الطبي أو الحدود أو المواعيد. المحتوى ما زال مسودة.'
+    },
     {
       version: '0.1.0-draft',
       date: '2026-11-10',

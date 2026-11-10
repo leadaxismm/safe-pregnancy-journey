@@ -57,12 +57,12 @@ export function Layout({ children, onReset }: { children: ReactNode; onReset: ()
 
       {contentMeta.status !== 'approved' && (
         <div className="bg-amber-100 px-4 py-1.5 text-center text-sm font-bold text-amber-900 dark:bg-amber-950 dark:text-amber-200" role="note">
-          {statusLabel[contentMeta.status]} · للمراجعة فقط وليست للاستخدام مع المريضات
+          نسخة تجريبية للمراجعة فقط · {statusLabel[contentMeta.status]} · ليست للاستخدام مع المريضات
         </div>
       )}
 
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur dark:border-slate-800 dark:bg-slate-950/90">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-2.5">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-2.5">
           <Link to="/" className="flex min-w-0 items-center gap-3" aria-label="رحلة الحمل الآمن — الصفحة الرئيسية">
             <img src="./icon.svg" alt="" className="h-10 w-10 shrink-0 rounded-xl" />
             <div className="min-w-0 leading-tight">
@@ -81,12 +81,12 @@ export function Layout({ children, onReset }: { children: ReactNode; onReset: ()
         </div>
       </header>
 
-      <main id="main" className="mx-auto w-full max-w-5xl flex-1 px-4 pb-32 pt-6 fade-in" key={loc.pathname}>
+      <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 pb-32 pt-6 fade-in" key={loc.pathname}>
         {children}
       </main>
 
       <footer className="border-t border-slate-200 bg-white px-4 pb-28 pt-6 text-sm dark:border-slate-800 dark:bg-slate-950">
-        <div className="mx-auto max-w-5xl space-y-2 muted">
+        <div className="mx-auto max-w-6xl space-y-2 muted">
           <p className="font-bold text-slate-700 dark:text-slate-300">{disclaimer}</p>
           <p>المصدر: {contentMeta.sourceTitle}. إعداد المحتوى الأصلي: {contentMeta.sourcePageAuthor}.</p>
           <p>
@@ -99,7 +99,7 @@ export function Layout({ children, onReset }: { children: ReactNode; onReset: ()
 
       {/* Danger signs take priority on every page: persistent help bar */}
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-urgent-100 bg-white/95 px-4 pb-[max(12px,env(safe-area-inset-bottom))] pt-3 backdrop-blur dark:border-urgent-900 dark:bg-slate-950/95">
-        <div className="mx-auto flex max-w-5xl items-center gap-3">
+        <div className="mx-auto flex max-w-6xl items-center gap-3">
           <button onClick={openHelp} className="btn-urgent flex-1 text-lg shadow-lg shadow-urgent-600/20 sm:flex-none sm:px-8">
             <Siren className="h-6 w-6" aria-hidden="true" /> أحتاج إلى مساعدة طبية الآن
           </button>

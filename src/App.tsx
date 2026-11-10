@@ -15,6 +15,8 @@ import About from './pages/About';
 import NotFound from './pages/NotFound';
 
 const Admin = lazy(() => import('./pages/admin/Admin'));
+const DemoAdmin = lazy(() => import('./pages/admin/Admin').then(m => ({ default: m.DemoAdmin })));
+import { config } from './lib/config';
 
 function PatientApp() {
   const [resetKey, setResetKey] = useState(0);
@@ -42,12 +44,12 @@ function PatientApp() {
 
 function Root() {
   const loc = useLocation();
-  if (loc.pathname.startsWith('/admin')) {
-    return (
-      <Suspense fallback={<div className="p-8 text-center">جارٍ التحميل…</div>}>
-        <Admin />
-      </Suspense>
-    );
+  // Staff areas are separate from the patient app and never linked from patient pages.
+  if (loc.pathname === '/admin-demo' && config.demoDashboard) {
+    return <Suspense fallback={<div className="p-8 text-center">جارٍ التحميل…</div>}><DemoAdmin /></Suspense>;
+  }
+  if (loc.pathname === '/admin') {
+    return <Suspense fallback={<div className="p-8 text-center">جارٍ التحميل…</div>}><Admin /></Suspense>;
   }
   return <PatientApp />;
 }

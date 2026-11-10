@@ -1,53 +1,117 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { BarChart3, Download, FileCheck2, LogOut, QrCode, Activity, TriangleAlert } from 'lucide-react';
-import { getAdminApi, type AdminApi, type Stats, type EdRow, type Approval } from '../../lib/adminApi';
+import { BarChart3, Download, FileCheck2, LogOut, QrCode, Activity, TriangleAlert, KeyRound, Lock, FlaskConical, Database } from 'lucide-react';
+import { getAdminApi, getDemoApi, type AdminApi, type Stats, type EdRow, type Approval, type StaffSession } from '../../lib/adminApi';
 import { topicLabels, qrLocations } from '../../content/locations';
 import { contentMeta, statusLabel } from '../../content/meta';
 import { config } from '../../lib/config';
 import { quiz } from '../../content/learn';
 
 type Tab = 'overview' | 'impact' | 'governance' | 'qr';
+const envLabel: Record<string, string> = { preview: 'نسخة المراجعة (preview)', production: 'الإنتاج (production)', test: 'بيانات الاختبار الآلي (test)' };
 const pct = (a: number, b: number) => (b ? Math.round((a / b) * 1000) / 10 : 0);
 const fmt = (n: number | null | undefined, d = 0) => (n === null || n === undefined ? '—' : n.toLocaleString('ar-SA-u-nu-latn', { maximumFractionDigits: d }));
+/** "Not available" when there is no data — never show 0 % or a fake average */
+const NA = 'غير متاح';
 
-export default function Admin() {
-  const [api, setApi] = useState<AdminApi | null>(null);
-  const [session, setSession] = useState<{ email: string } | null | undefined>(undefined);
-  useEffect(() => { getAdminApi().then(async a => { setApi(a); setSession(await a.getSession()); }); }, []);
+/** Data-source context: real vs demo, plus the staff role (viewer/editor) for UI gating. */
+const SourceCtx = createContext<{ demo: boolean; canEdit: boolean }>({ demo: false, canEdit: false });
+const useSource = () => useContext(SourceCtx);
+
+function useNoIndex(title: string) {
   useEffect(() => {
     const m = document.createElement('meta'); m.name = 'robots'; m.content = 'noindex,nofollow'; document.head.appendChild(m);
-    document.title = 'لوحة الإدارة · رحلة الحمل الآمن';
+    document.title = title;
     return () => { m.remove(); document.title = 'رحلة الحمل الآمن | Safe Pregnancy Journey'; };
-  }, []);
-
-  if (!api || session === undefined) return <div className="p-10 text-center">جارٍ التحميل…</div>;
-  if (!session) return <Login api={api} onIn={async () => setSession(await api.getSession())} />;
-  return <Dashboard api={api} email={session.email} onOut={async () => { await api.signOut(); setSession(null); }} />;
+  }, [title]);
 }
 
-function Login({ api, onIn }: { api: AdminApi; onIn: () => void }) {
+/** #/admin — real staff dashboard. Supabase Auth only; there is no demo fallback here. */
+export default function Admin() {
+  useNoIndex('لوحة الإدارة · رحلة الحمل الآمن');
+  const apiP = useMemo(() => getAdminApi(), []);
+  const [api, setApi] = useState<AdminApi | null>(null);
+  const [session, setSession] = useState<StaffSession | null | undefined>(undefined);
+  useEffect(() => { apiP?.then(async a => { setApi(a); setSession(await a.getSession()); }).catch(() => setSession(null)); }, [apiP]);
+
+  if (!apiP) return (
+    <Centered>
+      <Database className="mx-auto h-10 w-10 text-slate-400" aria-hidden="true" />
+      <h1 className="mt-3 text-xl font-extrabold">لوحة الإدارة غير مهيأة</h1>
+      <p className="mt-2 muted">لم يتم ربط قاعدة البيانات في هذه النسخة، لذلك لا يمكن الدخول إلى لوحة الإدارة. لا توجد بيانات تجريبية في هذا المسار.</p>
+      <Link to="/" className="btn-secondary mt-5">العودة إلى المنصة</Link>
+    </Centered>
+  );
+  if (!api || session === undefined) return <div className="p-10 text-center">جارٍ التحميل…</div>;
+  if (!session) return <Login api={api} onIn={s => setSession(s)} />;
+  return (
+    <SourceCtx.Provider value={{ demo: false, canEdit: session.role === 'editor' }}>
+      <Dashboard api={api} session={session} onOut={async () => { await api.signOut(); setSession(null); }} />
+    </SourceCtx.Provider>
+  );
+}
+
+/** #/admin-demo — separate, read-only dashboard with SAMPLE numbers. No sign-in, no writes, no database. */
+export function DemoAdmin() {
+  useNoIndex('عرض تجريبي · لوحة الإدارة');
+  const api = useMemo(() => getDemoApi(), []);
+  return (
+    <SourceCtx.Provider value={{ demo: true, canEdit: false }}>
+      <Dashboard api={api} session={null} onOut={() => {}} />
+    </SourceCtx.Provider>
+  );
+}
+
+function Centered({ children }: { children: ReactNode }) {
+  return <div className="grid min-h-dvh place-items-center p-4"><div className="card w-full max-w-md p-8 text-center">{children}</div></div>;
+}
+
+function Login({ api, onIn }: { api: AdminApi; onIn: (s: StaffSession) => void }) {
   const [email, setEmail] = useState(''); const [pw, setPw] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
   return (
     <div className="grid min-h-dvh place-items-center p-4">
       <form className="card w-full max-w-sm space-y-4 p-6" onSubmit={async e => {
         e.preventDefault(); setBusy(true); setErr('');
-        try { await api.signIn(email, pw); onIn(); } catch { setErr('تعذّر تسجيل الدخول. تحقّق من البيانات أو من صلاحيتك.'); } finally { setBusy(false); }
+        try { onIn(await api.signIn(email.trim(), pw)); }
+        catch (x) { setErr((x as Error).message === 'not_authorized' ? 'هذا الحساب غير مخوّل بالدخول إلى لوحة الإدارة.' : 'البريد الإلكتروني أو كلمة المرور غير صحيحة.'); }
+        finally { setBusy(false); setPw(''); }
       }}>
-        <h1 className="text-xl font-extrabold">لوحة الإدارة</h1>
-        <p className="text-sm muted">مخصصة لفريق المشروع فقط.</p>
+        <div className="flex items-center gap-2"><Lock className="h-6 w-6 text-brand-600" aria-hidden="true" /><h1 className="text-xl font-extrabold">دخول الموظفين المخوّلين</h1></div>
+        <p className="text-sm muted">لوحة الإدارة مخصصة لفريق المشروع. المنصة التثقيفية للمريضات لا تحتاج إلى تسجيل دخول. لا يوجد تسجيل حسابات جديدة؛ الحسابات يضيفها مسؤول النظام.</p>
         <label className="block"><span className="mb-1 block font-semibold">البريد الإلكتروني</span><input className="field text-base" dir="ltr" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} required /></label>
         <label className="block"><span className="mb-1 block font-semibold">كلمة المرور</span><input className="field text-base" dir="ltr" type="password" autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} required /></label>
-        {err && <p className="font-semibold text-urgent-600">{err}</p>}
-        <button className="btn-primary w-full" disabled={busy}>دخول</button>
+        {err && <p className="font-semibold text-urgent-600" role="alert">{err}</p>}
+        <button className="btn-primary w-full" disabled={busy}>{busy ? 'جارٍ التحقق…' : 'دخول'}</button>
+        <Link to="/" className="btn-ghost w-full text-sm">العودة إلى المنصة</Link>
       </form>
     </div>
   );
 }
 
-function Dashboard({ api, email, onOut }: { api: AdminApi; email: string; onOut: () => void }) {
+function ChangePassword({ api }: { api: AdminApi }) {
+  const [open, setOpen] = useState(false); const [a, setA] = useState(''); const [b, setB] = useState(''); const [msg, setMsg] = useState('');
+  if (!open) return <button onClick={() => setOpen(true)} className="btn-secondary min-h-[40px] px-3 text-sm"><KeyRound className="h-4 w-4" />تغيير كلمة المرور</button>;
+  return (
+    <form className="flex flex-wrap items-center gap-2" onSubmit={async e => {
+      e.preventDefault(); setMsg('');
+      if (a.length < 12) return setMsg('12 حرفًا على الأقل.');
+      if (a !== b) return setMsg('كلمتا المرور غير متطابقتين.');
+      try { await api.changePassword(a); setMsg('تم التغيير.'); setA(''); setB(''); setTimeout(() => setOpen(false), 1500); } catch { setMsg('تعذّر التغيير.'); }
+    }}>
+      <input className="field h-10 min-h-0 w-40 text-sm" dir="ltr" type="password" autoComplete="new-password" placeholder="كلمة جديدة" value={a} onChange={e => setA(e.target.value)} />
+      <input className="field h-10 min-h-0 w-40 text-sm" dir="ltr" type="password" autoComplete="new-password" placeholder="تأكيدها" value={b} onChange={e => setB(e.target.value)} />
+      <button className="btn-primary min-h-[40px] px-3 text-sm">حفظ</button>
+      <button type="button" className="btn-ghost min-h-[40px] px-2 text-sm" onClick={() => setOpen(false)}>إلغاء</button>
+      {msg && <span className="text-sm font-semibold" role="status">{msg}</span>}
+    </form>
+  );
+}
+
+function Dashboard({ api, session, onOut }: { api: AdminApi; session: StaffSession | null; onOut: () => void }) {
+  const { demo } = useSource();
   const [tab, setTab] = useState<Tab>('overview');
   const [range, setRange] = useState<'month' | '3m' | '6m' | 'year'>('6m');
+  const [env, setEnv] = useState<string>(config.appEnv === 'test' ? 'test' : config.appEnv);
   const [stats, setStats] = useState<Stats | null>(null);
   const [ed, setEd] = useState<EdRow[]>([]);
   const [err, setErr] = useState('');
@@ -60,43 +124,49 @@ function Dashboard({ api, email, onOut }: { api: AdminApi; email: string; onOut:
   }, [range]);
 
   useEffect(() => {
-    setErr('');
-    api.stats(from, to).then(setStats).catch(() => setErr('تعذّر تحميل الإحصائيات. تأكد من صلاحية حسابك.'));
+    setErr(''); setStats(null);
+    api.stats(from, to, env).then(setStats).catch(() => setErr('تعذّر تحميل الإحصائيات. تأكد من صلاحية حسابك.'));
     api.ed().then(setEd).catch(() => {});
-  }, [api, from, to]);
+  }, [api, from, to, env]);
+
+  const sourceLabel = demo ? 'بيانات تجريبية (عيّنة) — ليست نتائج فعلية' : `بيانات فعلية مجمّعة · البيئة: ${envLabel[env] ?? env}`;
 
   const exportXlsx = async () => {
     if (!stats) return;
     const XLSX = await import('xlsx');
     const wb = XLSX.utils.book_new();
+    const v = (n: number | null, N: number) => (N > 0 && n !== null ? n : NA);
     const summary = [
       ['المؤشر', 'القيمة'],
+      ['مصدر البيانات', sourceLabel],
       ['الفترة', `${from.toISOString().slice(0, 10)} → ${to.toISOString().slice(0, 10)}`],
-      ['نوع البيانات', api.mode === 'demo' ? 'بيانات تجريبية' : 'بيانات فعلية مجمّعة'],
-      ['عدد الزيارات (المستفيدات)', stats.visits],
+      ['تاريخ الإنشاء', new Date().toISOString()],
+      ['عدد الزيارات', stats.visits],
       ['مشاهدات الصفحات', stats.pageViews],
+      ['المستفيدات من المحتوى التثقيفي (بدء التعلّم)', stats.learnStarted],
+      ['إكمال رحلة التعلّم', stats.learnCompleted],
+      ['نسبة إكمال التعلّم %', stats.learnStarted ? pct(stats.learnCompleted, stats.learnStarted) : NA],
       ['استبيانات عوامل الخطورة المكتملة', stats.riskCompleted],
       ['منها بإجابات كاملة', stats.riskCompletedFull],
-      ['بدء رحلة التعلّم', stats.learnStarted],
-      ['إكمال رحلة التعلّم', stats.learnCompleted],
-      ['نسبة إكمال التعلّم %', pct(stats.learnCompleted, stats.learnStarted)],
-      [`متوسط الاختبار القبلي (من ${quiz.length})`, stats.preAvg ?? ''],
-      [`متوسط الاختبار البعدي (من ${quiz.length})`, stats.postAvg ?? ''],
-      ['نسبة معرفة علامات الخطر بعد التثقيف %', stats.dangerKnownPct ?? ''],
-      ['متوسط الرضا (من 5)', stats.satisfactionAvg ?? ''],
-      ['عدد التقييمات', stats.satisfactionN],
-      ['فتح زر «أحتاج إلى مساعدة طبية الآن»', stats.helpOpened]
+      [`متوسط الاختبار القبلي (من ${quiz.length})`, v(stats.preAvg, stats.preN)],
+      [`متوسط الاختبار البعدي (من ${quiz.length})`, v(stats.postAvg, stats.postN)],
+      ['نسبة معرفة علامات الخطر بعد التثقيف %', v(stats.dangerKnownPct, stats.dangerN)],
+      ['متوسط الرضا (من 5)', v(stats.satisfactionAvg, stats.satisfactionN)],
+      ['نسبة الرضا (4–5 نجوم) %', stats.satisfactionN ? pct((stats.satisfactionDist[3] ?? 0) + (stats.satisfactionDist[4] ?? 0), stats.satisfactionN) : NA],
+      ['فتح زر «أحتاج إلى مساعدة طبية الآن»', stats.helpOpened],
+      ['أثر المبادرة على الطوارئ', ed.length ? 'اتجاه فقط — لا يثبت أثرًا دون تحليل مقارن معتمد' : 'غير متاح — لا توجد بيانات تشغيلية معتمدة']
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summary), 'الملخص');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stats.monthly.map(m => ({
       'الشهر': m.month, 'الزيارات': m.visits, 'استبيانات مكتملة': m.riskCompleted, 'بدء التعلّم': m.learnStarted, 'إكمال التعلّم': m.learnCompleted,
-      'نسبة الإكمال %': pct(m.learnCompleted, m.learnStarted), 'متوسط قبلي': m.preAvg, 'متوسط بعدي': m.postAvg, 'معرفة علامات الخطر %': m.dangerKnownPct, 'متوسط الرضا': m.satisfactionAvg
+      'نسبة الإكمال %': m.learnStarted ? pct(m.learnCompleted, m.learnStarted) : NA, 'متوسط قبلي': m.preAvg ?? NA, 'متوسط بعدي': m.postAvg ?? NA,
+      'معرفة علامات الخطر %': m.dangerKnownPct ?? NA, 'متوسط الرضا': m.satisfactionAvg ?? NA
     }))), 'تقرير شهري');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stats.topTopics.map(t => ({ 'الموضوع': topicLabels[t.topic] ?? t.topic, 'المشاهدات': t.views }))), 'الموضوعات');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stats.sources.map(t => ({ 'مصدر الدخول': topicLabels[t.topic] ?? t.topic, 'الزيارات': t.views }))), 'مواقع رمز QR');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ed.map(e => ({ 'الشهر': e.month, 'إجمالي زيارات الطوارئ': e.total_visits, 'الزيارات غير العاجلة': e.nonurgent_visits, 'النسبة %': pct(e.nonurgent_visits, e.total_visits), 'المصدر': e.source }))), 'الطوارئ');
     wb.Workbook = { Views: [{ RTL: true }] } as any;
-    XLSX.writeFile(wb, `safe-pregnancy-report-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.writeFile(wb, `safe-pregnancy-report-${demo ? 'DEMO-' : ''}${env}-${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   const tabs: [Tab, string, ReactNode][] = [
@@ -108,20 +178,19 @@ function Dashboard({ api, email, onOut }: { api: AdminApi; email: string; onOut:
 
   return (
     <div className="min-h-dvh">
-      {api.mode === 'demo' && (
-        <div className="bg-amber-100 px-4 py-2 text-center text-sm font-bold text-amber-900 dark:bg-amber-950 dark:text-amber-200">
-          وضع العرض: الأرقام أدناه بيانات تجريبية للمراجعة فقط. اربط Supabase لعرض البيانات الفعلية.
-        </div>
-      )}
+      <div className={`px-4 py-2 text-center text-sm font-bold ${demo ? 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200' : 'bg-calm-50 text-calm-800 dark:bg-calm-900/40 dark:text-calm-200'}`} role="note">
+        {demo ? <><FlaskConical className="inline h-4 w-4" aria-hidden="true" /> عرض تجريبي منفصل: كل الأرقام عيّنة مصطنعة لاستعراض التصميم فقط، وليست نتائج فعلية. لا يمكن من هنا تعديل أو اعتماد أي شيء.</> : <><Database className="inline h-4 w-4" aria-hidden="true" /> {sourceLabel}</>}
+      </div>
       <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
           <div>
-            <div className="text-lg font-extrabold text-brand-700 dark:text-brand-300">لوحة الإدارة · رحلة الحمل الآمن</div>
-            <div className="text-xs muted">إحصائيات مجمّعة ومجهولة الهوية · {email !== 'demo' && <span dir="ltr">{email}</span>}</div>
+            <div className="text-lg font-extrabold text-brand-700 dark:text-brand-300">لوحة مؤشرات الجودة · رحلة الحمل الآمن</div>
+            <div className="text-xs muted">إحصائيات مجمّعة ومجهولة الهوية{session && <> · <span dir="ltr">{session.email}</span> · {session.role === 'editor' ? 'صلاحية تعديل' : 'صلاحية اطلاع'}</>}</div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Link to="/" className="btn-ghost min-h-[40px] px-3 text-sm">المنصة</Link>
-            {api.mode === 'supabase' && <button onClick={onOut} className="btn-secondary min-h-[40px] px-3 text-sm"><LogOut className="h-4 w-4" />خروج</button>}
+            {session && <ChangePassword api={api} />}
+            {session && <button onClick={onOut} className="btn-secondary min-h-[40px] px-3 text-sm"><LogOut className="h-4 w-4" />خروج</button>}
           </div>
         </div>
         <nav className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-4" aria-label="أقسام لوحة الإدارة">
@@ -135,15 +204,25 @@ function Dashboard({ api, email, onOut }: { api: AdminApi; email: string; onOut:
       <main className="mx-auto max-w-6xl space-y-6 px-4 py-6">
         {(tab === 'overview' || tab === 'impact') && (
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-900" role="group" aria-label="الفترة">
-              {([['month', 'هذا الشهر'], ['3m', '3 أشهر'], ['6m', '6 أشهر'], ['year', 'سنة']] as const).map(([k, l]) => (
-                <button key={k} onClick={() => setRange(k)} aria-pressed={range === k} className={`min-h-[40px] rounded-lg px-3 text-sm font-bold ${range === k ? 'bg-white shadow-sm dark:bg-slate-800' : 'muted'}`}>{l}</button>
-              ))}
+            <div className="flex flex-wrap gap-2">
+              <div className="flex gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-900" role="group" aria-label="الفترة">
+                {([['month', 'هذا الشهر'], ['3m', '3 أشهر'], ['6m', '6 أشهر'], ['year', 'سنة']] as const).map(([k, l]) => (
+                  <button key={k} onClick={() => setRange(k)} aria-pressed={range === k} className={`min-h-[40px] rounded-lg px-3 text-sm font-bold ${range === k ? 'bg-white shadow-sm dark:bg-slate-800' : 'muted'}`}>{l}</button>
+                ))}
+              </div>
+              {!demo && (
+                <label className="flex items-center gap-2 text-sm font-bold">البيئة
+                  <select className="field h-11 min-h-0 w-auto py-0 text-sm" value={env} onChange={e => setEnv(e.target.value)}>
+                    {Object.entries(envLabel).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                  </select>
+                </label>
+              )}
             </div>
             <button onClick={exportXlsx} disabled={!stats} className="btn-primary min-h-[44px] text-sm"><Download className="h-4 w-4" />تصدير التقرير إلى Excel</button>
           </div>
         )}
         {err && <p className="rounded-xl bg-urgent-50 p-3 font-semibold text-urgent-700">{err}</p>}
+        {(tab === 'overview' || tab === 'impact') && !stats && !err && <p className="muted">جارٍ تحميل البيانات…</p>}
         {tab === 'overview' && stats && <Overview s={stats} />}
         {tab === 'impact' && stats && <Impact s={stats} ed={ed} api={api} onSaved={() => api.ed().then(setEd)} />}
         {tab === 'governance' && <Governance api={api} />}
@@ -154,10 +233,11 @@ function Dashboard({ api, email, onOut }: { api: AdminApi; email: string; onOut:
 }
 
 function Kpi({ label, value, sub, ltr }: { label: string; value: string; sub?: string; ltr?: boolean }) {
+  const { demo } = useSource();
   return (
-    <div className="card p-4">
-      <div className="text-sm font-semibold muted">{label}</div>
-      <div dir={ltr ? 'ltr' : undefined} className="mt-1 text-right text-3xl font-extrabold tabular text-slate-900 dark:text-white">{value}</div>
+    <div className={`card relative p-4 ${demo ? 'border-dashed' : ''}`}>
+      <div className="flex items-start justify-between gap-2 text-sm font-semibold muted"><span>{label}</span>{demo && <span className="shrink-0 rounded-full bg-amber-100 px-2 text-[11px] font-bold text-amber-900">عيّنة</span>}</div>
+      <div dir={ltr && value !== NA ? 'ltr' : undefined} className={`mt-1 text-right font-extrabold tabular ${value === NA ? 'text-xl text-slate-400' : 'text-3xl text-slate-900 dark:text-white'}`}>{value}</div>
       {sub && <div className="mt-0.5 text-xs muted">{sub}</div>}
     </div>
   );
@@ -178,60 +258,88 @@ function Bars({ rows, color = 'bg-brand-600' }: { rows: { label: string; value: 
   );
 }
 
+const avg = (v: number | null, n: number, d = 2) => (n > 0 && v !== null ? fmt(v, d) : NA);
+const rate = (a: number, b: number) => (b > 0 ? `${pct(a, b)}%` : NA);
+const satPct = (s: Stats) => (s.satisfactionN > 0 ? `${pct((s.satisfactionDist[3] ?? 0) + (s.satisfactionDist[4] ?? 0), s.satisfactionN)}%` : NA);
+
+function Empty({ text = 'لا توجد بيانات في هذه الفترة.' }: { text?: string }) {
+  return <p className="rounded-xl bg-slate-50 p-4 text-center text-sm font-semibold text-slate-500 dark:bg-slate-900">{text}</p>;
+}
+
 function Overview({ s }: { s: Stats }) {
+  const { demo } = useSource();
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label="المستفيدات (زيارات)" value={fmt(s.visits)} sub={`${fmt(s.pageViews)} مشاهدة صفحة`} />
-        <Kpi label="استبيانات الخطورة المكتملة" value={fmt(s.riskCompleted)} sub={`${pct(s.riskCompletedFull, s.riskCompleted)}% بإجابات كاملة`} />
-        <Kpi label="نسبة إكمال رحلة التعلّم" value={`${pct(s.learnCompleted, s.learnStarted)}%`} sub={`${fmt(s.learnCompleted)} من ${fmt(s.learnStarted)}`} />
-        <Kpi label="رضا المستفيدات" value={s.satisfactionAvg ? `${fmt(s.satisfactionAvg, 1)} / 5` : '—'} sub={`${fmt(s.satisfactionN)} تقييم`} ltr />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
+        <Kpi label={demo ? 'الزيارات' : 'الزيارات الفعلية'} value={fmt(s.visits)} sub={`${fmt(s.pageViews)} مشاهدة صفحة`} />
+        <Kpi label="المستفيدات من التثقيف" value={fmt(s.learnStarted)} sub="بدأن رحلة التعلّم" />
+        <Kpi label="استبيانات مكتملة" value={fmt(s.riskCompleted)} sub={s.riskCompleted ? `${pct(s.riskCompletedFull, s.riskCompleted)}% بإجابات كاملة` : undefined} />
+        <Kpi label="معدل إكمال التثقيف" value={rate(s.learnCompleted, s.learnStarted)} sub={`${fmt(s.learnCompleted)} من ${fmt(s.learnStarted)}`} />
+        <Kpi label="نسبة الرضا (4–5 نجوم)" value={satPct(s)} sub={s.satisfactionN ? `متوسط ${fmt(s.satisfactionAvg, 1)} من 5 · ${fmt(s.satisfactionN)} تقييم` : 'لا توجد تقييمات'} />
+        <Kpi label="يعرفن علامات الخطر" value={s.dangerN ? `${fmt(s.dangerKnownPct, 1)}%` : NA} sub="بعد التثقيف" />
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="card p-5">
           <h2 className="mb-4 text-lg font-extrabold">أكثر الموضوعات مشاهدة</h2>
-          <Bars rows={s.topTopics.map(t => ({ label: topicLabels[t.topic] ?? t.topic, value: t.views }))} />
+          {s.topTopics.length ? <Bars rows={s.topTopics.map(t => ({ label: topicLabels[t.topic] ?? t.topic, value: t.views }))} /> : <Empty />}
         </section>
         <section className="card p-5">
           <h2 className="mb-4 text-lg font-extrabold">مصدر الدخول (موقع رمز QR)</h2>
-          <Bars color="bg-calm-600" rows={s.sources.map(t => ({ label: topicLabels[t.topic] ?? t.topic, value: t.views }))} />
+          {s.sources.length ? <Bars color="bg-calm-600" rows={s.sources.map(t => ({ label: topicLabels[t.topic] ?? t.topic, value: t.views }))} /> : <Empty />}
         </section>
         <section className="card p-5">
           <h2 className="mb-1 text-lg font-extrabold">نتائج الاختبارات المعرفية (مجمّعة)</h2>
           <p className="mb-4 text-sm muted">متوسط الدرجة من {quiz.length} · القبلي {fmt(s.preN)} مشاركة · البعدي {fmt(s.postN)} مشاركة</p>
           <div className="grid grid-cols-3 gap-3 text-center">
-            <div className="rounded-xl bg-slate-100 p-3 dark:bg-slate-800"><div className="text-sm muted">قبل</div><div className="text-2xl font-extrabold tabular">{fmt(s.preAvg, 2)}</div></div>
-            <div className="rounded-xl bg-calm-50 p-3 dark:bg-calm-900/40"><div className="text-sm muted">بعد</div><div className="text-2xl font-extrabold tabular text-calm-700 dark:text-calm-300">{fmt(s.postAvg, 2)}</div></div>
-            <div className="rounded-xl bg-brand-50 p-3 dark:bg-brand-950"><div className="text-sm muted">يعرفن علامات الخطر</div><div className="text-2xl font-extrabold tabular">{s.dangerKnownPct !== null ? `${fmt(s.dangerKnownPct, 1)}%` : '—'}</div></div>
+            <div className="rounded-xl bg-slate-100 p-3 dark:bg-slate-800"><div className="text-sm muted">قبل</div><div className="text-2xl font-extrabold tabular">{avg(s.preAvg, s.preN)}</div></div>
+            <div className="rounded-xl bg-calm-50 p-3 dark:bg-calm-900/40"><div className="text-sm muted">بعد</div><div className="text-2xl font-extrabold tabular text-calm-700 dark:text-calm-300">{avg(s.postAvg, s.postN)}</div></div>
+            <div className="rounded-xl bg-brand-50 p-3 dark:bg-brand-950"><div className="text-sm muted">يعرفن علامات الخطر</div><div className="text-2xl font-extrabold tabular">{s.dangerN ? `${fmt(s.dangerKnownPct, 1)}%` : NA}</div></div>
           </div>
           <p className="mt-3 text-xs muted">ملاحظة: المشاركات في الاختبارين مجهولة وغير مرتبطة ببعضها، لذا تمثل الأرقام متوسط المجموعة لا تحسّن كل مستفيدة.</p>
         </section>
         <section className="card p-5">
           <h2 className="mb-4 text-lg font-extrabold">توزيع تقييم الرضا</h2>
-          <Bars color="bg-brand-400" rows={[5, 4, 3, 2, 1].map(n => ({ label: `${n} ${'★'.repeat(n)}`, value: s.satisfactionDist[n - 1] ?? 0 }))} />
+          {s.satisfactionN ? <Bars color="bg-brand-400" rows={[5, 4, 3, 2, 1].map(n => ({ label: `${n} ${'★'.repeat(n)}`, value: s.satisfactionDist[n - 1] ?? 0 }))} /> : <Empty text="لا توجد تقييمات رضا بعد." />}
           <p className="mt-4 text-sm muted">فتح زر «أحتاج إلى مساعدة طبية الآن»: <b className="tabular">{fmt(s.helpOpened)}</b> · فتح صفحة الأعراض: <b className="tabular">{fmt(s.symptomOpened)}</b></p>
         </section>
       </div>
       <section className="card overflow-x-auto p-5">
-        <h2 className="mb-3 text-lg font-extrabold">التقرير الشهري</h2>
-        <table className="w-full min-w-[640px] text-sm">
+        <h2 className="mb-3 text-lg font-extrabold">اتجاهات الاستخدام الشهرية</h2>
+        {s.monthly.length > 0 && <MonthlyTrend rows={s.monthly} />}
+        {!s.monthly.length ? <Empty /> : <table className="w-full min-w-[640px] text-sm">
           <thead><tr className="border-b border-slate-200 text-start dark:border-slate-800">{['الشهر', 'الزيارات', 'استبيانات', 'بدء التعلّم', 'إكمال', 'قبلي', 'بعدي', 'علامات الخطر', 'الرضا'].map(h => <th key={h} className="py-2 text-start font-bold">{h}</th>)}</tr></thead>
           <tbody className="tabular">
             {s.monthly.map(m => (
               <tr key={m.month} className="border-b border-slate-100 dark:border-slate-800">
                 <td className="py-2 font-bold">{m.month}</td><td>{fmt(m.visits)}</td><td>{fmt(m.riskCompleted)}</td><td>{fmt(m.learnStarted)}</td>
-                <td>{pct(m.learnCompleted, m.learnStarted)}%</td><td>{fmt(m.preAvg, 2)}</td><td>{fmt(m.postAvg, 2)}</td>
-                <td>{m.dangerKnownPct !== null ? `${fmt(m.dangerKnownPct, 1)}%` : '—'}</td><td>{fmt(m.satisfactionAvg, 2)}</td>
+                <td>{rate(m.learnCompleted, m.learnStarted)}</td><td>{m.preAvg ?? NA}</td><td>{m.postAvg ?? NA}</td>
+                <td>{m.dangerKnownPct !== null ? `${fmt(m.dangerKnownPct, 1)}%` : NA}</td><td>{m.satisfactionAvg ?? NA}</td>
               </tr>
             ))}
           </tbody>
-        </table>
+        </table>}
       </section>
     </>
   );
 }
 
+function MonthlyTrend({ rows }: { rows: Stats['monthly'] }) {
+  const max = Math.max(1, ...rows.map(r => r.visits));
+  return (
+    <div className="mb-5 flex h-40 items-end gap-2" role="img" aria-label="عدد الزيارات الشهرية">
+      {rows.map(r => (
+        <div key={r.month} className="flex h-full flex-1 flex-col items-center justify-end gap-1">
+          <span className="text-xs font-bold tabular">{fmt(r.visits)}</span>
+          <span className="w-full max-w-[56px] rounded-t-lg bg-brand-500" style={{ height: `${(r.visits / max) * 75}%` }} />
+          <span className="text-[11px] tabular muted">{r.month}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Impact({ s, ed, api, onSaved }: { s: Stats; ed: EdRow[]; api: AdminApi; onSaved: () => void }) {
+  const { demo, canEdit } = useSource();
   const [form, setForm] = useState<EdRow>({ month: new Date().toISOString().slice(0, 7), total_visits: 0, nonurgent_visits: 0, source: '' });
   const [msg, setMsg] = useState('');
   const launch = s.monthly[0]?.month;
@@ -247,11 +355,11 @@ function Impact({ s, ed, api, onSaved }: { s: Stats; ed: EdRow[]; api: AdminApi;
       </div>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
         <Kpi label="1. عدد المستفيدات" value={fmt(s.visits)} />
-        <Kpi label="2. نسبة إكمال رحلة التثقيف" value={`${pct(s.learnCompleted, s.learnStarted)}%`} />
-        <Kpi label="3. متوسط المعرفة قبل ← بعد" value={`${fmt(s.preAvg, 1)} ← ${fmt(s.postAvg, 1)}`} sub={`قبل ← بعد · من ${quiz.length}`} />
-        <Kpi label="4. يعرفن علامات الخطر" value={s.dangerKnownPct !== null ? `${fmt(s.dangerKnownPct, 1)}%` : '—'} sub="إجابة صحيحة عن كل أسئلة علامات الخطر" />
-        <Kpi label="5. رضا المستفيدات" value={s.satisfactionAvg ? `${fmt(s.satisfactionAvg, 1)} / 5` : '—'} ltr />
-        <Kpi label="6. الزيارات غير العاجلة للطوارئ" value={ed.length ? `${pct(ed[ed.length - 1].nonurgent_visits, ed[ed.length - 1].total_visits)}%` : '—'} sub={ed.length ? `آخر شهر مُدخل: ${ed[ed.length - 1].month}` : 'لم تُدخل بيانات بعد'} />
+        <Kpi label="2. نسبة إكمال رحلة التثقيف" value={rate(s.learnCompleted, s.learnStarted)} />
+        <Kpi label="3. المعرفة: قبل ← بعد" value={s.preN && s.postN ? `${fmt(s.preAvg, 1)} ← ${fmt(s.postAvg, 1)}` : NA} sub={`متوسط الدرجة من ${quiz.length}`} />
+        <Kpi label="4. يعرفن علامات الخطر" value={s.dangerN ? `${fmt(s.dangerKnownPct, 1)}%` : NA} sub="إجابة صحيحة عن كل أسئلة علامات الخطر" />
+        <Kpi label="5. رضا المستفيدات" value={satPct(s)} sub="نسبة تقييم 4–5 نجوم" />
+        <Kpi label="6. الزيارات غير العاجلة للطوارئ" value={ed.length ? `${pct(ed[ed.length - 1].nonurgent_visits, ed[ed.length - 1].total_visits)}%` : NA} sub={ed.length ? `اتجاه فقط · آخر شهر: ${ed[ed.length - 1].month}` : 'لا توجد بيانات تشغيلية معتمدة'} />
       </div>
       <section className="card p-5">
         <h2 className="mb-1 text-lg font-extrabold">اتجاه الزيارات غير العاجلة للطوارئ (% من الإجمالي)</h2>
@@ -270,9 +378,10 @@ function Impact({ s, ed, api, onSaved }: { s: Stats; ed: EdRow[]; api: AdminApi;
               );
             })}
           </div>
-        ) : <p className="muted">لا توجد بيانات بعد.</p>}
+        ) : <Empty text="غير متاح: لم تُدخل بيانات تشغيلية معتمدة من قسم الطوارئ بعد. لن يُعرض أي أثر قبل توفرها وإجراء تحليل مقارن معتمد." />}
+        <p className="mt-3 rounded-xl bg-slate-50 p-3 text-sm font-semibold dark:bg-slate-900">حالة تقييم الأثر: <span className="text-tier-amber">لم يُثبت أثر</span> — يلزم تحليل مقارن قبل/بعد تعتمده وحدة الجودة.</p>
       </section>
-      <section className="card p-5">
+      {canEdit && !demo && <section className="card p-5">
         <h2 className="mb-3 text-lg font-extrabold">إدخال بيانات شهرية معتمدة</h2>
         <form className="grid gap-3 sm:grid-cols-5" onSubmit={async e => {
           e.preventDefault(); setMsg('');
@@ -287,12 +396,14 @@ function Impact({ s, ed, api, onSaved }: { s: Stats; ed: EdRow[]; api: AdminApi;
         </form>
         {msg && <p className="mt-2 font-semibold" role="status">{msg}</p>}
         <p className="mt-2 text-xs muted">أدخل أرقامًا مجمّعة فقط (لا بيانات مريضات). تعريف «غير العاجلة» يجب أن يكون ثابتًا ومعتمدًا من قسم الطوارئ (مثل مستويات الفرز 4–5).</p>
-      </section>
+      </section>}
     </>
   );
 }
 
 function Governance({ api }: { api: AdminApi }) {
+  const { demo, canEdit } = useSource();
+  const [gerr, setGerr] = useState('');
   const [list, setList] = useState<Approval[]>([]);
   const [f, setF] = useState({ reviewer: '', notes: '', decision: 'approved' as Approval['decision'] });
   const load = () => api.approvals().then(setList).catch(() => {});
@@ -312,11 +423,16 @@ function Governance({ api }: { api: AdminApi }) {
         <p className="mt-3 text-sm muted">سير العمل: أي تعديل طبي يتم في ملفات المحتوى (src/content) برقم إصدار جديد ← مراجعة الفريق الطبي وفق docs/CLINICAL_REVIEW.md ← تسجيل القرار هنا ← تحديث الحالة وتاريخ المراجعة في الكود ← النشر.</p>
       </section>
       <section className="card p-5">
-        <h2 className="mb-3 text-lg font-extrabold">تسجيل قرار مراجعة للإصدار {contentMeta.version}</h2>
+        <h2 className="mb-3 text-lg font-extrabold">سجل قرارات المراجعة الطبية</h2>
+        {canEdit && !demo ? <>
+        <p className="mb-3 text-sm muted">تسجيل قرار هنا لا يغيّر حالة المحتوى المنشور تلقائيًا. الحالة تبقى «مسودة» حتى يُحدَّث ملف الإصدار في الكود بعد الاعتماد الموقّع.</p>
         <form className="grid gap-3 sm:grid-cols-[1fr_1fr_auto_auto]" onSubmit={async e => {
           e.preventDefault();
-          await api.addApproval({ content_version: contentMeta.version, decision: f.decision, reviewer: f.reviewer, notes: f.notes, reviewed_at: new Date().toISOString().slice(0, 10) }).catch(() => {});
-          setF({ reviewer: '', notes: '', decision: 'approved' }); load();
+          setGerr('');
+          try {
+            await api.addApproval({ content_version: contentMeta.version, decision: f.decision, reviewer: f.reviewer.trim(), notes: f.notes.trim(), reviewed_at: new Date().toISOString().slice(0, 10) });
+            setF({ reviewer: '', notes: '', decision: 'approved' }); load();
+          } catch { setGerr('تعذّر التسجيل — تحقق من صلاحيتك.'); }
         }}>
           <input className="field text-base" placeholder="اسم المراجع ومسماه" value={f.reviewer} onChange={e => setF({ ...f, reviewer: e.target.value })} required />
           <input className="field text-base" placeholder="ملاحظات" value={f.notes} onChange={e => setF({ ...f, notes: e.target.value })} />
@@ -325,6 +441,8 @@ function Governance({ api }: { api: AdminApi }) {
           </select>
           <button className="btn-primary">تسجيل</button>
         </form>
+        {gerr && <p className="mt-2 font-semibold text-urgent-600" role="alert">{gerr}</p>}
+        </> : <p className="mb-2 text-sm muted">{demo ? 'العرض التجريبي للقراءة فقط.' : 'حسابك بصلاحية اطلاع فقط؛ تسجيل القرارات لمن لديهم صلاحية تعديل.'}</p>}
         <ul className="mt-4 divide-y divide-slate-100 text-[15px] dark:divide-slate-800">
           {list.map(a => (
             <li key={a.id} className="flex flex-wrap gap-x-4 py-2">

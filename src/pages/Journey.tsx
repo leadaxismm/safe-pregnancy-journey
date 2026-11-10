@@ -3,10 +3,11 @@ import { Link } from 'react-router-dom';
 import { ChevronDown, Minus, Plus, Route, Siren, Star } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { SpeakButton } from '../components/SpeakButton';
+import { Icon } from '../components/Icon';
 import { journey, stepsForWeek, tagLabel, highRiskNote, type JourneyStep, type JourneyTag } from '../content/journey';
 
 const tagIcon: Record<JourneyTag, string> = {
-  appointment: '📅', tests: '🧪', scan: '🖥️', vaccine: '💉', birth: '👶', watch: '👀', supplement: '💊', risk: '🚦'
+  appointment: 'CalendarCheck', tests: 'FlaskConical', scan: 'ScanLine', vaccine: 'Syringe', birth: 'Baby', watch: 'Eye', supplement: 'Pill', risk: 'ShieldAlert'
 };
 
 function stepSpeech(s: JourneyStep) {
@@ -18,7 +19,7 @@ function StepItems({ step }: { step: JourneyStep }) {
     <ul className="mt-2 space-y-1.5">
       {step.items.map(i => (
         <li key={i.text} className="flex gap-2">
-          <span aria-hidden="true" className="shrink-0">{tagIcon[i.tag]}</span>
+          <Icon name={tagIcon[i.tag]} className="mt-1 h-5 w-5 shrink-0 text-brand-600 dark:text-brand-300" />
           <span><span className="sr-only">{tagLabel[i.tag]}: </span>{i.text}</span>
         </li>
       ))}
@@ -103,7 +104,7 @@ export default function Journey() {
           <button onClick={() => setFilter(null)} aria-pressed={filter === null} className={`chip min-h-[40px] shrink-0 border ${filter === null ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300 dark:border-slate-700'}`}>الكل</button>
           {tags.map(t => (
             <button key={t} onClick={() => setFilter(t)} aria-pressed={filter === t} className={`chip min-h-[40px] shrink-0 border ${filter === t ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300 dark:border-slate-700'}`}>
-              <span aria-hidden="true">{tagIcon[t]}</span>{tagLabel[t]}
+              <Icon name={tagIcon[t]} className="h-4 w-4" />{tagLabel[t]}
             </button>
           ))}
         </div>

@@ -35,6 +35,15 @@ export default function About() {
           <dt className="font-bold">آخر مراجعة طبية</dt><dd className="tabular">{contentMeta.lastClinicalReview ?? 'لم تتم بعد'}</dd>
           {contentMeta.approvedBy && (<><dt className="font-bold">اعتمده</dt><dd>{contentMeta.approvedBy}</dd></>)}
         </dl>
+        <h3 className="mt-4 font-extrabold">سجل الإصدارات والمراجعات</h3>
+        <ol className="mt-2 space-y-2">
+          {contentMeta.changelog.map((c, i) => (
+            <li key={i} className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
+              <div className="text-sm font-bold"><bdi dir="ltr" className="tabular">{c.version}</bdi> · <span className="tabular">{c.date}</span></div>
+              <p className="text-sm muted">{c.note}</p>
+            </li>
+          ))}
+        </ol>
       </section>
     </div>
   );

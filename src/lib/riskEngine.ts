@@ -36,6 +36,7 @@ export interface RiskResult {
   findings: Finding[];
   redCount: number;
   amberCount: number;
+  /** exact BMI (unrounded) */
   bmi: number | null;
   /**
    * Tier to display. null when the answers are incomplete and nothing red was found —
@@ -55,10 +56,44 @@ export function inRange(v: number | null, [min, max]: readonly [number, number])
   return v !== null && Number.isFinite(v) && v >= min && v <= max;
 }
 
+/**
+ * Strict number parsing for user input. Accepts Western or Arabic-Indic digits and
+ * "." or "٫" as decimal separator. Anything else (letters, signs, empty) → null.
+ */
+export function parseNumber(raw: string | null | undefined): number | null {
+  if (raw === null || raw === undefined) return null;
+  const s = String(raw).trim()
+    .replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    .replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+    .replace(/[٫,]/g, '.');
+  if (!/^\d+(\.\d+)?$/.test(s)) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Age must be whole years within range. */
+export function validAge(age: number | null): boolean {
+  return inRange(age, validRanges.age) && Number.isInteger(age);
+}
+
+/**
+ * Exact (unrounded) BMI. Thresholds are ALWAYS applied to this value.
+ * Fix (v0.2): v0.1 rounded to 1 decimal before comparing, so e.g. 29.96 was classed as ≥30.
+ */
 export function computeBmi(heightCm: number | null, weightKg: number | null): number | null {
   if (!inRange(heightCm, validRanges.heightCm) || !inRange(weightKg, validRanges.weightKg)) return null;
-  const m = (heightCm as number) / 100;
-  return Math.round(((weightKg as number) / (m * m)) * 10) / 10;
+  // weight×10000 / height² avoids the binary error of (h/100)² (e.g. 76.8 / 1.6² = 29.999999999999993).
+  // The 1e-9 clean-up removes only floating-point noise; it is not clinical rounding.
+  const raw = ((weightKg as number) * 10000) / ((heightCm as number) * (heightCm as number));
+  return Math.round(raw * 1e9) / 1e9;
+}
+
+/**
+ * BMI for display only: truncated (not rounded) to 1 decimal so the shown number
+ * never crosses a threshold the exact value did not cross (29.96 → "29.9", not "30.0").
+ */
+export function displayBmi(bmi: number): string {
+  return (Math.floor(bmi * 10 + 1e-9) / 10).toFixed(1);
 }
 
 export function evaluate(input: RiskInput): RiskResult {
@@ -66,7 +101,7 @@ export function evaluate(input: RiskInput): RiskResult {
   const missing: string[] = [];
 
   // Age
-  const ageOk = inRange(input.age, validRanges.age);
+  const ageOk = validAge(input.age);
   if (!ageOk) missing.push('العمر');
   else {
     const age = input.age as number;
@@ -79,9 +114,10 @@ export function evaluate(input: RiskInput): RiskResult {
   const bmi = computeBmi(input.heightCm, input.weightKg);
   if (bmi === null) missing.push('الطول والوزن');
   else {
-    if (bmi >= thresholds.bmiRed) findings.push({ id: 'bmi', tier: 'red', text: `مؤشر كتلة الجسم ${bmi} (40 أو أكثر)` });
-    else if (bmi >= thresholds.bmiAmberFrom) findings.push({ id: 'bmi', tier: 'amber', text: `مؤشر كتلة الجسم ${bmi} (من 30 إلى أقل من 40)` });
-    else if (bmi < thresholds.bmiAmberUnder) findings.push({ id: 'bmi', tier: 'amber', text: `مؤشر كتلة الجسم ${bmi} (أقل من 18)` });
+    const shown = displayBmi(bmi);
+    if (bmi >= thresholds.bmiRed) findings.push({ id: 'bmi', tier: 'red', text: `مؤشر كتلة الجسم ${shown} (40 أو أكثر)` });
+    else if (bmi >= thresholds.bmiAmberFrom) findings.push({ id: 'bmi', tier: 'amber', text: `مؤشر كتلة الجسم ${shown} (من 30 إلى أقل من 40)` });
+    else if (bmi < thresholds.bmiAmberUnder) findings.push({ id: 'bmi', tier: 'amber', text: `مؤشر كتلة الجسم ${shown} (أقل من 18)` });
   }
 
   // Checklist items
@@ -107,5 +143,7 @@ export function evaluate(input: RiskInput): RiskResult {
   else if (amberCount > 0) tier = 'amber';
   else tier = 'green';
 
+  // Safety invariant: an incomplete result is never green.
+  if (!complete && tier === 'green') tier = null;
   return { complete, missing, findings, redCount, amberCount, bmi, tier };
 }
