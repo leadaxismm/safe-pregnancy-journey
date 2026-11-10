@@ -8,7 +8,7 @@
  *   2. The result is educational, never a diagnosis or a placement decision.
  *
  * This engine does NOT look at current symptoms. Symptoms are handled separately
- * (see pages/Symptoms.tsx) and always take priority.
+ * (see pages/Emergency.tsx) and always take priority.
  */
 import { allFactors, thresholds, type RiskFactor } from '../content/riskFactors';
 
@@ -39,11 +39,22 @@ export interface RiskResult {
   /** exact BMI (unrounded) */
   bmi: number | null;
   /**
-   * Tier to display. null when the answers are incomplete and nothing red was found —
-   * in that case the UI must NOT show any colour.
-   * When incomplete but a red factor exists, red is shown (adding answers cannot lower it).
+   * FINAL educational tier. Only given when every answer is known — except red, which is
+   * shown even when incomplete because more answers can never lower it. Never green when incomplete.
    */
   tier: ResultTier | null;
+  /**
+   * Level already CONFIRMED by the "yes" answers given so far (null if no factor found).
+   * Adding answers can only raise it, never lower it, so it is safe to show as "at least".
+   * Never 'green': the absence of an answer is not evidence of low risk.
+   */
+  knownLevel: Exclude<ResultTier, 'green'> | null;
+  /** checklist items answered «لا أعرف» — kept as unknown, never treated as «لا» */
+  unsureIds: string[];
+  /** checklist items not answered at all */
+  unansweredIds: string[];
+  missingAge: boolean;
+  missingBody: boolean;
 }
 
 export const validRanges = {
@@ -121,14 +132,16 @@ export function evaluate(input: RiskInput): RiskResult {
   }
 
   // Checklist items
-  let unanswered = 0;
-  let unsure = 0;
+  const unsureIds: string[] = [];
+  const unansweredIds: string[] = [];
   allFactors.forEach((f: RiskFactor) => {
     const a = input.answers[f.id];
     if (a === 'yes') findings.push({ id: f.id, tier: f.tier, text: f.text });
-    else if (a === 'unsure') unsure++;
-    else if (a !== 'no') unanswered++;
+    else if (a === 'unsure') unsureIds.push(f.id);
+    else if (a !== 'no') unansweredIds.push(f.id);
   });
+  const unanswered = unansweredIds.length;
+  const unsure = unsureIds.length;
   if (unanswered) missing.push(`${unanswered} ${unanswered === 1 ? 'سؤال لم تتم الإجابة عنه' : unanswered === 2 ? 'سؤالان لم تتم الإجابة عنهما' : 'أسئلة لم تتم الإجابة عنها'}`);
   if (unsure) missing.push(`${unsure} ${unsure === 1 ? 'إجابة' : 'إجابات'} «لا أعرف»`);
 
@@ -136,14 +149,19 @@ export function evaluate(input: RiskInput): RiskResult {
   const amberCount = findings.filter(f => f.tier === 'amber').length;
   const complete = missing.length === 0;
 
+  // Level confirmed by the factors found so far (same rules as the source page, applied to "yes" answers only)
+  let knownLevel: RiskResult['knownLevel'] = null;
+  if (redCount > 0) knownLevel = 'red';
+  else if (amberCount >= thresholds.amberCountForHospitalReview) knownLevel = 'hospitalReview';
+  else if (amberCount > 0) knownLevel = 'amber';
+
+  // Final tier: only when complete — except red, which can never be lowered by more answers.
   let tier: ResultTier | null;
   if (redCount > 0) tier = 'red';
-  else if (amberCount >= thresholds.amberCountForHospitalReview) tier = 'hospitalReview';
   else if (!complete) tier = null;
-  else if (amberCount > 0) tier = 'amber';
-  else tier = 'green';
+  else tier = knownLevel ?? 'green';
 
   // Safety invariant: an incomplete result is never green.
   if (!complete && tier === 'green') tier = null;
-  return { complete, missing, findings, redCount, amberCount, bmi, tier };
+  return { complete, missing, findings, redCount, amberCount, bmi, tier, knownLevel, unsureIds, unansweredIds, missingAge: !ageOk, missingBody: bmi === null };
 }

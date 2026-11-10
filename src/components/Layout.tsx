@@ -81,7 +81,7 @@ export function Layout({ children, onReset }: { children: ReactNode; onReset: ()
         </div>
       </header>
 
-      <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 pb-32 pt-6 fade-in" key={loc.pathname}>
+      <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 pb-32 pt-4 fade-in sm:pt-6" key={loc.pathname}>
         {children}
       </main>
 
@@ -103,7 +103,7 @@ export function Layout({ children, onReset }: { children: ReactNode; onReset: ()
           <button onClick={openHelp} className="btn-urgent flex-1 text-lg shadow-lg shadow-urgent-600/20 sm:flex-none sm:px-8">
             <Siren className="h-6 w-6" aria-hidden="true" /> أحتاج إلى مساعدة طبية الآن
           </button>
-          <Link to="/symptoms" className="hidden text-sm font-bold text-urgent-700 underline-offset-4 hover:underline sm:block dark:text-urgent-100">
+          <Link to="/emergency" className="hidden text-sm font-bold text-urgent-700 underline-offset-4 hover:underline sm:block dark:text-urgent-100">
             هل لديكِ علامة خطر؟ تعرّفي عليها
           </Link>
         </div>

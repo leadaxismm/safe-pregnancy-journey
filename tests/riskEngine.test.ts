@@ -45,6 +45,10 @@ describe('risk engine — source page rules', () => {
   it('any red item → red', () => expect(t({}, { r12: 'yes' }).tier).toBe('red'));
   it('1–2 amber → amber', () => expect(t({}, { a1: 'yes', a2: 'yes' }).tier).toBe('amber'));
   it('≥ 3 amber (incl. age) → hospital review', () => expect(t({ age: 36 }, { a1: 'yes', a3: 'yes' }).tier).toBe('hospitalReview'));
+  it('complete result: knownLevel equals tier (except green → null)', () => {
+    expect(t({ age: 36 }, { a1: 'yes', a3: 'yes' }).knownLevel).toBe('hospitalReview');
+    expect(t({}, {}).knownLevel).toBeNull();
+  });
   it('red beats ≥3 amber', () => expect(t({}, { a1: 'yes', a2: 'yes', a3: 'yes', r1: 'yes' }).tier).toBe('red'));
   it('BMI computation', () => expect(computeBmi(160, 64)).toBeCloseTo(25, 10));
   it('out-of-range inputs are treated as missing', () => {
@@ -114,9 +118,9 @@ describe('v0.2 — answers & separation from symptoms', () => {
     const r = evaluate({ age: 28, heightCm: 160, weightKg: 60, answers: a });
     expect(r.tier).toBeNull(); expect(r.missing.join(' ')).toContain('لا أعرف');
   });
-  it('≥3 amber while incomplete → hospital review shown with incomplete flag', () => {
+  it('≥3 amber while incomplete → no final tier, known level = hospital review', () => {
     const r = evaluate({ age: 36, heightCm: 160, weightKg: 80, answers: { a1: 'yes' } });
-    expect(r.tier).toBe('hospitalReview'); expect(r.complete).toBe(false);
+    expect(r.tier).toBeNull(); expect(r.knownLevel).toBe('hospitalReview'); expect(r.complete).toBe(false);
   });
   it('engine input has no symptom fields (risk tier is independent of current symptoms)', () => {
     const r = evaluate({ age: 28, heightCm: 160, weightKg: 60, answers: allNo() }) as any;
@@ -130,6 +134,52 @@ describe('v0.2 — answers & separation from symptoms', () => {
       const r = evaluate({ age: rnd() > .1 ? Math.floor(10 + rnd() * 55) : null, heightCm: rnd() > .1 ? 115 + rnd() * 100 : null, weightKg: rnd() > .1 ? 25 + rnd() * 120 : null, answers });
       if (!r.complete) expect(r.tier).not.toBe('green');
       if (r.redCount > 0) expect(r.tier).toBe('red');
+    }
+  });
+});
+
+
+describe('v0.3 — «لا أعرف» keeps confirmed factors and never counts as «لا»', () => {
+  const base = { age: 28, heightCm: 160, weightKg: 60 };
+  // the user's example: hypothyroid on treatment = yes, one previous CS = yes, another item = unsure
+  const example = () => evaluate({ ...base, answers: { ...allNo(), a6: 'yes', a1: 'yes', a3: 'unsure' } });
+
+  it('all confirmed factors are listed even when another answer is unknown', () => {
+    const r = example();
+    expect(r.findings.map(f => f.id).sort()).toEqual(['a1', 'a6']);
+    expect(r.findings.every(f => f.tier === 'amber')).toBe(true);
+  });
+  it('status is incomplete, unknown question is identified', () => {
+    const r = example();
+    expect(r.complete).toBe(false); expect(r.unsureIds).toEqual(['a3']); expect(r.unansweredIds).toEqual([]);
+  });
+  it('confirmed amber shown as known level (at least), no final tier', () => {
+    const r = example();
+    expect(r.knownLevel).toBe('amber'); expect(r.tier).toBeNull();
+  });
+  it('«لا أعرف» is not treated as «لا»: same answers with «لا» give a final amber tier', () => {
+    const r = evaluate({ ...base, answers: { ...allNo(), a6: 'yes', a1: 'yes', a3: 'no' } });
+    expect(r.complete).toBe(true); expect(r.tier).toBe('amber');
+    expect(example().tier).not.toBe(r.tier);
+  });
+  it('no factors + one unknown → no tier, no known level, never green', () => {
+    const r = evaluate({ ...base, answers: { ...allNo(), r4: 'unsure' } });
+    expect(r.tier).toBeNull(); expect(r.knownLevel).toBeNull(); expect(r.findings).toHaveLength(0);
+  });
+  it('confirmed red with unknown answers → red tier shown', () => {
+    const r = evaluate({ ...base, answers: { ...allNo(), r2: 'yes', a1: 'unsure', a2: 'unsure' } });
+    expect(r.tier).toBe('red'); expect(r.knownLevel).toBe('red'); expect(r.complete).toBe(false); expect(r.unsureIds).toEqual(['a1', 'a2']);
+  });
+  it('missing age / body are flagged separately', () => {
+    const r = evaluate({ age: null, heightCm: 160, weightKg: null, answers: allNo() });
+    expect(r.missingAge).toBe(true); expect(r.missingBody).toBe(true);
+  });
+  it('knownLevel is monotonic: answering unknowns can only keep or raise it', () => {
+    const rank = { amber: 1, hospitalReview: 2, red: 3 } as const;
+    const start = example();
+    for (const v of ['yes', 'no'] as Answer[]) {
+      const r = evaluate({ ...base, answers: { ...allNo(), a6: 'yes', a1: 'yes', a3: v } });
+      expect(rank[r.knownLevel!]).toBeGreaterThanOrEqual(rank[start.knownLevel!]);
     }
   });
 });

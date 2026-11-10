@@ -60,7 +60,7 @@ export const learnCards: LearnCard[] = [
       'ألم أو تورّم في ساق واحدة · ضيق في التنفس أو ألم في الصدر',
       'عند أيٍّ منها: لا تنتظري، اطلبي المساعدة الطبية فورًا.'
     ],
-    link: { to: '/emergency', label: 'متى أراجع الطوارئ؟' }
+    link: { to: '/emergency', label: 'علامات الخطر ومتى أراجع الطوارئ؟' }
   },
   {
     id: 'birth-prep', icon: 'BedDouble', title: 'الاستعداد للولادة',

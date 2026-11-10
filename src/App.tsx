@@ -1,12 +1,11 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
-import { HashRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { HashRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { HelpProvider } from './components/HelpContext';
 import { Layout } from './components/Layout';
 import { trackVisitOnce } from './lib/analytics';
 import Home from './pages/Home';
 import Journey from './pages/Journey';
 import RiskCheck from './pages/RiskCheck';
-import Symptoms from './pages/Symptoms';
 import Emergency from './pages/Emergency';
 import WhereToFollow from './pages/WhereToFollow';
 import Tips from './pages/Tips';
@@ -29,7 +28,7 @@ function PatientApp() {
           <Route path="/" element={<Home />} />
           <Route path="/journey" element={<Journey />} />
           <Route path="/risk" element={<RiskCheck />} />
-          <Route path="/symptoms" element={<Symptoms />} />
+          <Route path="/symptoms" element={<Navigate to="/emergency" replace />} />
           <Route path="/emergency" element={<Emergency />} />
           <Route path="/where" element={<WhereToFollow />} />
           <Route path="/tips" element={<Tips />} />
